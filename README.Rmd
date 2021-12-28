@@ -1,0 +1,114 @@
+---
+output: github_document
+always_allow_html: true
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+```
+
+# DoxyICU Results
+This repo provides the raw data and analysis code to support the paper <em>Doxycycline for the prevention of progression of COVID-19 to severe disease requiring intensive care unit (ICU) admission: a randomized, controlled, open-label, parallel group trial (DOXPREVENT.ICU)</em> by Dhar et al, submitted to the Lancet on 26 December 2021.
+
+The raw data are contained in `data 2021-12 Dec-24.Rds`, the analysis code in `analysis.Rmd` and the results in `analysis.html`.
+
+# Data description
+```{r, echo=FALSE}
+data <- readRDS("data 2021-12 Dec-24.Rds")
+
+types <- data %>% 
+           dplyr::summarise_all(class) %>% 
+           tidyr::gather(variable, class)
+
+labels <- tribble(~variable, ~Label,
+"UUID", "Unique database ID",
+"PatNo", "Patient number. 4 characters left-padded with zeroes.  Numbered from 1 within site",
+"SiteID", "Site ID. 3 characters left-padded with zeroes.",
+"Treatment", "Randomised treatment: `Standard of Care`, `Doxycycline`",
+"ICDate", "Date of informed consent",         
+"Sex", "Patient sex: 'Male'=1, 'Female'=2 or NA",
+"Age", "Patient age at baseline in completed years",                      
+"Ethnicity", "Patient ethnicity: 'White'=1, 'Black Caribbean'=2, 'Black African'=3  'Indian'=4, 'Pakistani'=5, 'Bangladeshi'=6, 'Chinese'=7, 'Other'=8",
+"Temperature", "Patient temperature at baseline in Celsius",                    
+"TemperatureLocation", "Location at which temperature was measured: 'On forehead'=1, 'Orally'=2",
+"OnsetDate", "Date of symptom onset",                      
+"AdmissionDate", "Date of hospital admission",
+"FinalStatus", "Final status: 'Completed 14 days of treatment and discharged'=1, 'Discharged before completing 14 days of treatment'=2, 'Discontinued treatment because of treatment-related adverse events'=3, 'Discontinued treatment for reasons unrelated to treatment'=4, 'Lost to follow-up'=5, 'Consent withdrawn'=6, 'Other'=7, 'Died'=8",                    
+"ICUAdmissionNeeded", "Did the patient need admission to ICU? 'Yes'=1, 'No'=0",
+"ICUAdmissionSuccess", "Was the patient actually admitted to ICU? 'Yes'=1, 'No'=0",            
+"ICUAdmissionNeededDate", "Date on which the patient's need for ICU admission was determined",
+"ICUNonAdmissionReason", "Why was the patient NOT admitted to ICU? 'Lack of beds'=1, 'Patient unsuitable'=2, 'Patient declined'=3, 'Other'=4",          
+"ICUDischargeDate", "Date of ICU discharge",
+"HospitalDischargeDate", "Date of hospital discharge",          
+"Alive", "Was the patient alive on the date of last follow-up? 'Yes'=1, 'No'=0",
+"DateOfDeath", "Date of death",                    
+"RelatedDeath", "Was the death related to COVID-19? 'Yes'=1, 'No'=0",
+"FollowUpDate", "Date of last follow-up",                   
+"PCRTest", "Inclusion/exclusion: Positive PCR test for SARS-CoV-2?  'Yes'=1, 'No'=0",
+"Hypersensitivity", "Inclusion/exclusion: Known hypersensitivity to doxycycline? 'Yes'=1, 'No'=0",               
+"MyastheniaGravis", "Inclusion/exclusion: Myasthenia gravis?  'Yes'=1, 'No'=0",
+"Pregnancy", "Inclusion/exclusion: Pregnancy?  'Yes'=1, 'No'=0 'Not applocable'=2",                      
+"Cirrhosis", "Inclusion/exclusion: Cirrhosis?  'Yes'=1, 'No'=0",
+"Dyspnea", "Inclusion/exclusion: New continuous cough or dyspnea?  'Yes'=1, 'No'=0",                        
+"Diarrhoea", "Inclusion/exclusion: Diarrhoea?  'Yes'=1, 'No'=0",
+"Anosmia", "Inclusion/exclusion: Has the patient recently lost their sense of smell? 'Yes'=1, 'No'=0",                        
+"Pneumonia", "Inclusion/exclusion: Evidence of pneumonia on x-ray?  'Yes'=1, 'No'=0 'X-ray not done`=2",
+"Rash", "Inclusion/exclusion: Does the patient have 'COVID rash' or 'COVID fingers and toes'? 'Yes'=1, 'No'=0",                           
+"TrtDoxycycline", "Post-baseline treatment with doxycycline? 'Yes'=1, 'No'=0",
+"TrtAntibiotics", "Post-baseline treatment with other antibiotics? 'Yes'=1, 'No'=0",                 
+"TrtAnalgesics", "Post-baseline treatment with analgesics? 'Yes'=1, 'No'=0",
+"TrtDiabetes", "Post-baseline treatment for diabetes? 'Yes'=1, 'No'=0",                    
+"TrtHeartFailure", "Post-baseline treatment for heart failure? 'Yes'=1, 'No'=0",
+"TrtAntiHypertensives", "Post-baseline treatment with anti-hypertensives? 'Yes'=1, 'No'=0",           
+"TrtAntiDepressants", "Post-baseline treatment with anti-depressants? 'Yes'=1, 'No'=0",
+"TrtCancer", "Post-baseline treatment for cancer? 'Yes'=1, 'No'=0",                      
+"TrtImmunosuppressant", "Post-baseline treatment with immunosuppressants? 'Yes'=1, 'No'=0",
+"TrtSteroids", "Post-baseline treatment with steroids? 'Yes'=1, 'No'=0",                    
+"TrtAntiCoagulantsProphylactic", "Post-baseline prophylactic treatment with anti-coagulants? 'Yes'=1, 'No'=0",
+"TrtAntiCoagulantsTherapeutic", "Post-baseline therapeutic treatment with anti-coagulants? 'Yes'=1, 'No'=0",   
+"TrtFavipiravir", "Post-baseline treatment with favipiravir? 'Yes'=1, 'No'=0",
+"TrtHydroxychloroquine", "Post-baseline treatment with hydroxychloroquine? 'Yes'=1, 'No'=0",          
+"TrtRemdesivir", "Post-baseline treatment with remdesivir? 'Yes'=1, 'No'=0",
+"TrtTocilizumab", "Post-baseline treatment with tocilizumab? 'Yes'=1, 'No'=0",                 
+"TrtIvermectin", "Post-baseline treatment with vermectin? 'Yes'=1, 'No'=0",
+"TrtOther", "Other relevant post-baseline treatment?Discontinuation due to ",                       
+"TreatmentDuration", "Treatment duration: 14 values from '1 day' to '14 days', '>14 days'",
+"TreatmentDiscontinuationReason", "Reason for dsiscontinuation of treatment: 'Patient improved, was discharged or the patient/physician chose not to give the full 14 day course of treatment'='1', 'Patient experienced unacceptable treatment-related side effects'='2', 'Other reasons'='3'", 
+"AENausea", "Discontinuation due to nausea? 'Yes'=1, 'No'=0",
+"AECramps", "Discontinuation due to cramps? 'Yes'=1, 'No'=0",                       
+"AEDiarrhoea", "Discontinuation due to diarrhoea? 'Yes'=1, 'No'=0",
+"AETinnitus", "Discontinuation due to tinnitus? 'Yes'=1, 'No'=0",                     
+"AEGenitalSoreness", "Discontinuation due to genital soreness? 'Yes'=1, 'No'=0",
+"AERash", "Discontinuation due to rash? 'Yes'=1, 'No'=0",                         
+"AEHeadache", "Discontinuation due to headache? 'Yes'=1, 'No'=0",
+"AEVision", "Discontinuation due to vision effects? 'Yes'=1, 'No'=0",                       
+"AEPalpitation", "Discontinuation due to palpitations? 'Yes'=1, 'No'=0",
+"AEOther", "Discontinuation due to other reasons? 'Yes'=1, 'No'=0",                        
+"StratumILD", "Risk factor for stratification: ILD 'Yes'=1, 'No'=0",
+"StratumCOPD", "Risk factor for stratification: COPD 'Yes'=1, 'No'=0",                    
+"StratumBronchiectasis", "Risk factor for stratification: bronchiectasis 'Yes'=1, 'No'=0",
+"StratumAsthma", "Risk factor for stratification: asthma 'Yes'=1, 'No'=0",                  
+"StratumOtherLung", "Risk factor for stratification: other lung condition 'Yes'=1, 'No'=0",
+"StratumDiabetes", "Risk factor for stratification: diabetes 'Yes'=1, 'No'=0",                
+"StratumHeartDisease", "Risk factor for stratification: heart disease 'Yes'=1, 'No'=0",
+"StratumHypertension", "Risk factor for stratification: hypertension 'Yes'=1, 'No'=0",            
+"StratumCancer", "Risk factor for stratification: cancer 'Yes'=1, 'No'=0",
+"StratumOther", "Risk factor for stratification: other 'Yes'=1, 'No'=0",                   
+"StratumCode", "Derived stratum code: 1, 2 or 3",
+"Stratum", "Derived stratum text: NONE [0], LUNG [1], OTHER [2]")
+
+types %>% 
+  left_join(labels, by="variable") %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+  
+```

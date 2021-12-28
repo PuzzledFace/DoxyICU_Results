@@ -1,0 +1,1178 @@
+---
+title: 'doxyICU: analysis'
+author: "John Kirkpatrick"
+date: "03/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+suppressMessages({
+  library(rpact)
+  library(MASS)
+  library(tidyverse)
+  library(lubridate)
+  library(knitr)
+  library(kableExtra)
+  library(rlang)
+  library(xlsx)
+  library(svglite)
+})
+```
+
+```{r, echo=FALSE, error=TRUE}
+data <- readRDS("data 2021-12 Dec-24.Rds")
+```
+
+## Data quality
+### Completeness
+```{r, echo=FALSE, error=TRUE}
+cols <- names(data)
+cols <- cols[!(cols %in% c("UUID", "PatNo", "SiteID"))]
+
+data %>% 
+  filter(Treatment != "") %>%
+  filter(!is.na(Treatment)) %>% 
+  dplyr::select(-UUID) %>%
+  summarise(across(all_of(cols), function(x) sum(is.na(x)))) %>%
+  pivot_longer(
+    cols=everything(),
+    names_to="Variable",
+    values_to="Missing"
+  ) %>%
+  mutate(
+    N=data %>% filter(Treatment != "") %>% nrow(),
+    Proportion=100 * Missing / N
+  ) %>%
+  arrange(Missing) %>% 
+  dplyr::select(-N) %>% 
+  kable(
+    table.attr="style='width: 40%;'" ,
+    caption="Proportion of data present for randomised patients, by variable" ,
+    col.names=c("Variable", "Missing", "Proportion"),
+    digits=c(NA, 0, 2)
+  )
+```
+
+## Enrolment
+```{r, echo=FALSE, error=TRUE}
+enrolmentPlot1 <- data %>%
+                    filter(!is.na(ICDate)) %>% 
+                    arrange(ICDate) %>% 
+                    mutate(Index=row_number()) %>% 
+                    ggplot() +
+                      geom_line(aes(x=ICDate, y=Index)) +
+                      labs(x="IC Date", y="Patients", title="Enrolment over time") +  
+                      theme_light()
+enrolmentPlot1
+svglite("enrolmentPlot1.svg")
+print(enrolmentPlot1)
+dev.off()
+
+enrolmentPlot2 <- data %>%
+                    filter(!is.na(ICDate)) %>% 
+                    ggplot() +
+                    geom_bar(aes(x=floor_date(ICDate, unit="week"))) +
+                    scale_x_date(breaks=seq(dmy("01-09-2020"), dmy("01-06-2021"), by="months")) +
+                    labs(title="Enrolment by week", y="Enrolment", x="Date") +  
+                    theme_light()
+enrolmentPlot2
+svglite("enrolmentPlot2.svg")
+print(enrolmentPlot2)
+dev.off()
+
+data %>%
+  filter(!is.na(ICDate)) %>% 
+  summarise(FPFV=min(ICDate), LPFV=max(ICDate))
+
+data %>%
+  filter(!is.na(ICDate)) %>% 
+  mutate(WeekBeginning=floor_date(ICDate, unit="week")) %>% 
+  group_by(Treatment, WeekBeginning) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(names_from=Treatment, values_from=N, values_fill=0) %>% 
+  rename(Doxy=Doxycycline, SOC=`Standard of Care`) %>% 
+  select(-`NA`) %>% 
+  mutate(TotalDoxy=cumsum(Doxy), TotalSOC=cumsum(SOC)) %>% 
+  kable()
+```
+
+## Baseline demographics [Randomised patients]
+### Demography
+```{r, echo=FALSE, error=TRUE}
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment) %>%
+  summarise(
+    N=n(),
+    across(Age, list("mean"=mean, "min"=min, "max"=max), na.rm=TRUE)
+  ) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    col.names=c("Treatment", "N", "Mean", "Min", "Max"),
+    digits=c(NA, 0, 1, 0, 0)
+  ) %>% 
+  add_header_above(c(" "=1, "Age"=4)) 
+
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment) %>%
+  summarise(
+    N=n(),
+    across(Temperature, list("mean"=mean, "min"=min, "max"=max), na.rm=TRUE)
+  ) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    col.names=c("Treatment", "N", "Mean", "Min", "Max"),
+    digits=c(NA, 0, 1, 0, 0)
+  ) %>% 
+  add_header_above(c(" "=1, "Temperature"=4)) 
+
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment, Sex) %>%
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(names_from=Sex, values_from=N) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    col.names=c("Treatment", "Male", "Female")
+  ) %>% 
+  add_header_above(c(" "=1, "Sex"=2)) 
+
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment) %>%
+  summarise(
+    Mean=mean(Age),
+    Min=min(Age),
+    Max=max(Age),
+    .groups="drop"
+  )
+```
+
+### Risk factors
+```{r, echo=FALSE, error=TRUE}
+tmp <- data %>%
+  filter(!is.na(Treatment)) %>% 
+  summarise(
+    across(matches("Stratum[A-Za-z]+"), mean, na.rm=TRUE),
+    .groups="drop"
+  )  %>% 
+  dplyr::select(-StratumCode) %>% 
+  pivot_longer(
+    starts_with("Stratum"),
+    names_to="Stratum",
+    values_to="Proportion"
+  ) %>% 
+  mutate(
+    Proportion=100*Proportion,
+    Stratum=stringr::str_sub(Stratum, 8)
+  ) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    digits=c(NA, 2),
+    caption="Incidence of stratification risk factors"
+  )
+```
+
+In earlier versions of this file, the following table was incorrect.
+
+```{r, echo=FALSE}
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(SiteID, PatNo, Treatment) %>% 
+  select(SiteID, PatNo, Treatment, matches("Stratum[A-Za-z]+")) %>% 
+  pivot_longer(matches("Stratum[A-Za-z]+"), names_to="Var", values_to="Value") %>% 
+  summarise(NRiskFactors=sum(Value), .groups="drop")  %>% 
+  group_by(Treatment, NRiskFactors) %>% 
+  summarise(N=n(), .groups="drop") %>% 
+  pivot_wider(
+    names_from=Treatment, 
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    caption="Number of patients with x risk facors",
+    col.names=c("X", "Doxycycline", "SOC")
+  )
+```
+
+### Stratification and sex
+```{r, echo=FALSE, error=TRUE}
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(Stratum, Sex) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=Sex,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  kable(
+    table.attr="style='width: 30%;'",
+    caption="Sex by stratum",
+    col.names=c("Stratum", "Male", "Female"),
+  )
+```
+
+## Outcomes
+### Deaths within 14 days of enrolment
+```{r, echo=FALSE, error=TRUE}
+outcomeTable <- function(var, labels, d=data, group=Stratum, title=NA, attr=NULL) {
+  qVar <- enquo(var)
+  gVar <- enquo(group)
+  vLabel <- enexpr(var)
+  gLabel <- enexpr(group)
+  if (is.na(title)) {
+    title <- paste(vLabel, "by", gLabel)
+  }
+  if (is.null(names(labels))) {
+    categories <- tibble(!! qVar := 1:length(labels))
+  } else {
+    suppressWarnings(categories <- tibble(!! qVar := as.numeric(names(labels))))
+  }
+  if (is.null(attr)) {
+    attr <- "style='width: 40%;'"
+  }
+  categories <- categories %>% expand(!! qVar, !! gVar :=  d %>% distinct(!! gVar) %>% pull(!! gVar))
+  header <- c(1, length(labels))
+  names(header) <- c(" ", vLabel)
+  temp <- d %>% 
+    filter(!is.na(!! gVar)) %>% 
+    group_by(!! qVar, !! gVar) %>% 
+    summarise(
+      N=n(),
+      .groups="drop"
+    )
+  temp %>% 
+    right_join(categories, by=as.character(c(vLabel, gLabel))) %>%
+    pivot_wider(
+      names_from=!! qVar,
+      values_from=N,
+      values_fill=0
+    )  %>% 
+    mutate(across(where(is.integer), ~ifelse(is.na(.x), 0, .x))) %>%
+    kable(
+      table.attr=attr,
+      col.names=c(gLabel, labels),
+      caption=title
+    ) %>%
+    add_header_above(header)
+}
+outcomeTable(Alive, labels=c("0"="No", "1"="Yes"))
+```
+
+### ICU admission
+```{r, echo=FALSE, error=TRUE}
+# data %>% 
+#   filter(
+#     SiteID ==  "008", 
+#     PatNo %in% c("0157", "0236")
+#   ) %>% 
+#   select(SiteID, PatNo, ICUAdmissionNeeded, ICUAdmissionNeededDate)
+
+outcomeTable(ICUAdmissionNeeded, labels=c("0"="No", "1"="Yes"))
+outcomeTable(ICUAdmissionSuccess, labels=c("0"="No", "1"="Yes"))
+outcomeTable(
+  ICUNonAdmissionReason, 
+  labels=c("1"="Lack of beds",  "2"="Patient unsuitable", "3"="Patient declined", "4"="Other"),
+  d=data %>% filter(ICUAdmissionSuccess == "0")
+)
+```
+
+### Final status etc
+```{r, echo=FALSE, error=TRUE}
+outcomeTable(Alive, labels=c("0"="No", "1"="Yes"))
+outcomeTable(FinalStatus, labels=c("Complete", "Early discharge", "TRAE", "Non-Trt", "Lost", "Consent", "Other", "Died"), attr="style='width: 70%;'")
+
+outcomeTable(
+  TreatmentDiscontinuationReason, 
+  labels=c("1"="Improved/Discharged", "3"="Other"),
+  d=data %>% mutate(TreatmentDiscontinuationReason=as.numeric(TreatmentDiscontinuationReason))
+)
+```
+
+Information on adverse events was to be collected only for patients who discontinued due to AEs.  As no patients discontinued for this reason, no information on AEs is available.
+
+# Results by treatment group [as randomised]
+## Stratification and treatment
+```{r, echo=FALSE, error=TRUE}
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment) %>% 
+  summarise(
+    across(matches("Stratum[A-Za-z]+"), mean, na.rm=TRUE),
+    .groups="drop"
+  ) %>%
+  dplyr::select(-StratumCode) %>%
+  pivot_longer(
+    starts_with("Stratum"),
+    names_to="Stratum",
+    values_to="Proportion"
+  )  %>%
+  mutate(
+    Proportion=100*Proportion,
+    Stratum=stringr::str_sub(Stratum, 8),
+    Treatment=ifelse(Treatment == "Doxycycline", "Doxycycline", "SOC")
+  ) %>% 
+  pivot_wider(
+    names_from=Treatment,
+    values_from=Proportion
+  ) %>% 
+  select(Stratum, Doxycycline, SOC) %>%
+  kable(
+    table.attr="style='width: 50%;'",
+    digits=c(NA, 2, 2),
+    caption="Stratification risk factors, by treatment group"
+  )
+
+data %>%
+  filter(!is.na(Treatment)) %>% 
+  group_by(Treatment) %>% 
+  summarise(
+    across(starts_with("Trt"), function(x) mean(as.numeric(x), na.rm=TRUE)),
+    .groups="drop"
+  ) %>%
+  # dplyr::select(-StratumCode) %>%
+  pivot_longer(
+    starts_with("Trt"),
+    names_to="Stratum",
+    values_to="Proportion"
+  )  %>%
+  mutate(
+    Proportion=100*Proportion,
+    Stratum=stringr::str_sub(Stratum, 4),
+    Treatment=ifelse(Treatment == "Doxycycline", "Doxycycline", "SOC")
+  ) %>% 
+  pivot_wider(
+    names_from=Treatment,
+    values_from=Proportion
+  ) %>% 
+  select(Stratum, Doxycycline, SOC) %>%
+  kable(
+    table.attr="style='width: 50%;'",
+    digits=c(NA, 2, 2),
+    caption="Concomitant treatments, by treatment group"
+  )
+
+data %>%
+  filter(Treatment == "Doxycycline", TrtDoxycycline != "1") %>% 
+  select(SiteID, PatNo, Treatment, TrtDoxycycline) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Patients randomised to doxycycline who did not receive doxycycline"
+  )
+
+data %>%
+  filter(Treatment != "Doxycycline", TrtDoxycycline != "0") %>% 
+  select(SiteID, PatNo, Treatment, TrtDoxycycline) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Patients randomised to standard of care who received doxycycline"
+  )
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(Stratum, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=Stratum,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  kable(
+    table.attr="style='width: 40%;'",
+    caption="Treatment by stratum"
+  ) 
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(ICUAdmissionNeeded, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUAdmissionNeeded,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  mutate(Pct=100*`1`/(`0` + `1`)) %>% 
+  kable(
+    table.attr="style='width: 40%;'",
+    caption="Need for ICU admission, by treatment",
+    col.names=c("Treatment", "No", "Yes", "Pct needed"),
+    digits=c(NA, 0, 0, 1)
+  ) %>% 
+  add_header_above(c(" "=1, "ICU Admission"=2, " "=1))
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(SiteID, ICUAdmissionNeeded, Treatment) %>% 
+  arrange(SiteID, ICUAdmissionNeeded, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUAdmissionNeeded,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    Treatment=ifelse(Treatment == "Doxycycline", Treatment, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=Treatment, 
+    names_glue="{Treatment}_{.value}") %>% 
+  select(SiteID, SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission, by treatment and site",
+    col.names=c("Site", "No", "Yes", "Pct needed", "No", "Yes", "Pct needed"),
+    digits=c(NA, 0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c(" "=1, "Standard of care"=3, "Doxycycline"=3)) 
+
+icuAdmissionPlot <- data %>% 
+                      filter(!is.na(Treatment)) %>% 
+                      ggplot(aes(x=SiteID, fill=as.factor(ICUAdmissionNeeded))) +
+                      geom_bar(position="dodge") +
+                      scale_fill_discrete(labels=c("No", "Yes"), name=" ") +
+                      labs(
+                        x="Site",
+                        y="Number of patients",
+                        title="ICU Admission needed?"
+                      ) +
+                      theme_light()
+icuAdmissionPlot
+svglite("icuAdmissionPlot.svg")
+print(icuAdmissionPlot)
+dev.off()
+data <- data %>%
+          mutate(
+            DateofDeath=as.Date(DateOfDeath, origin="01-01-1970"),
+            ICUDead14=ICUAdmissionNeeded | (interval(ICDate, DateOfDeath)/ddays(14) < 1),
+            ICUDead14=ifelse(is.na(ICUDead14), 0, ICUDead14)
+          ) 
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(ICUDead14, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUDead14,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  mutate(Pct=100*`1`/(`0` + `1`)) %>% 
+  kable(
+    table.attr="style='width: 40%;'",
+    col.names=c("Treatment", "No", "Yes", "Pct admitted"),
+    caption="Need for ICU admission or death within 14 days, by treatment",
+    digits=c(NA, 0, 0, 1)
+  ) %>% 
+  add_header_above(c(" "=1, "ICU Admission or death"=2, " "=1))
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(SiteID, ICUDead14, Treatment) %>% 
+  arrange(SiteID, ICUDead14, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUDead14,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    Treatment=ifelse(Treatment == "Doxycycline", Treatment, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=Treatment, 
+    names_glue="{Treatment}_{.value}") %>% 
+  select(SiteID, SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission or death, by treatment and site",
+    col.names=c("Site", "No", "Yes", "Pct", "No", "Yes", "Pct"),
+    digits=c(NA, 0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c(" "=1, "Standard of care"=3, "Doxycycline"=3)) 
+
+icuOrDeathPlot <- data %>% 
+                    filter(!is.na(Treatment)) %>% 
+                    ggplot(aes(x=SiteID, fill=as.factor(ICUDead14))) +
+                    geom_bar(position="dodge") +
+                    scale_fill_discrete(labels=c("No", "Yes"), name=" ") +
+                    labs(
+                      x="Site",
+                      y="Number of patients",
+                      title="ICU Admission needed or death?"
+                    ) +
+                    theme_light()
+icuOrDeathPlot
+svglite("icuOrDeathPlot.svg")
+print(icuOrDeathPlot)
+dev.off()
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(Alive, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=Alive,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  mutate(Pct=100*`1`/(`0` + `1`)) %>% 
+  kable(
+    table.attr="style='width: 40%;'",
+    caption="Survival by treatment",
+    digits=c(NA, 0, 0, 0, 1),
+    col.names=c("Treatment", "No", "Yes", "Unknown", "Pct Alive")
+  ) %>% 
+  add_header_above(c(" "=1, "Alive?"=3, " "=1)) %>% 
+  footnote(general=list("The status of patient 008-0017 is unknown."))
+
+data %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(SiteID, Alive, Treatment) %>% 
+  arrange(SiteID, Alive, Treatment) %>% 
+  filter(!is.na(Alive)) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=Alive,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>%
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    Treatment=ifelse(Treatment == "Doxycycline", Treatment, "SOC")
+    ) %>%
+  pivot_wider(
+    values_from=c(Yes, No, Pct),
+    names_from=Treatment,
+    names_glue="{Treatment}_{.value}") %>%
+  select(SiteID, SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>%
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission or death, by treatment and site",
+    col.names=c("Site", "No", "Yes", "Pct alive", "No", "Yes", "Pct alive"),
+    digits=c(NA, 0, 0, 1, 0, 0, 1)
+  ) %>%
+  add_header_above(c(" "=1, "Standard of care"=3, "Doxycycline"=3)) %>% 
+  footnote(general=list("The status of patient 008-0017 is unknown.  They are omitted from this table."))
+
+alivePlot <- data %>% 
+               filter(!is.na(Treatment)) %>% 
+               filter(!is.na(Alive)) %>% 
+               ggplot(aes(x=SiteID, fill=as.factor(Alive))) +
+                 geom_bar(position="dodge") +
+                 scale_fill_discrete(labels=c("No", "Yes"), name=" ") +
+                 labs(
+                   x="Site",
+                   y="Number of patients",
+                   title="Patient is alive?",
+                   caption="The status of patient 008-0017 is unknown.  They are omitted from this graphic."
+                 ) +
+                 theme_light()
+alivePlot
+svglite("alivePlot.svg")
+print(alivePlot)
+dev.off()
+```
+
+### Disposition of patients needing admission to ICU
+```{r, echo=FALSE}
+  data %>% 
+    mutate(ICUAdmissionSuccess=ifelse(is.na(ICUAdmissionSuccess) & ICUAdmissionNeeded, 0, ICUAdmissionSuccess)) %>% 
+    filter((!Alive | !is.na(DateOfDeath)) & ICUAdmissionNeeded & !ICUAdmissionSuccess) %>% 
+    select(SiteID, PatNo, Treatment, AdmissionDate, ICDate, ICUAdmissionNeeded, ICUAdmissionNeededDate, ICUNonAdmissionReason, Alive, DateOfDeath) %>%
+    kable(
+      caption="Patients who are known not to be alive, for whom ICU admission was needed but was not successful",
+      col.names=c("Site", "PatNo", "Trt", "Hosp Admit", "ICDate", "ICU Needed", "ICU Date", "Reason", "Alive", "Date of Death")
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+## Sample size calculation
+```{r, echo=FALSE, error=TRUE}
+pControl <- 0.25
+riskRatio <- 0.5
+pTest <- pControl * riskRatio
+allocRatio <- 1
+```
+We assume `r sprintf("%2.0f", 100 * pControl)`% of patients newly admitted to hospital with COVID-19 will require ICU care within 14 days of admission.  The addition of 200mg doxycycline qd to standard of care will reduce the need for ICU transfer within by `r sprintf("%2.0f", 100 * (1 - riskRatio))`%, a risk ratio of `r sprintf("%0.3f", 1 - riskRatio)`.  Loss to follow up will be no more than 5%.  A `r allocRatio`:1 randomisation ratio (Doxycycline plus SOC : SOC) will be used.
+
+We require 80% power using a one-sided alpha of 2.5%.
+```{r, echo=FALSE}
+ssFixed <- getSampleSizeRates(pi1=pTest, pi2=pControl, sided=1, alpha=0.025, beta=0.2, allocationRatioPlanned=allocRatio)
+n1 <- ceiling(ssFixed$nFixed1)
+n1Rando <- ceiling(n1 * 1.05)
+n2 <- ceiling(ssFixed$nFixed2)
+n2Rando <- ceiling(n2 * 1.05)
+```
+
+The sample size required for a conventional trial, with no interim analyses, looking at the difference in the rate of transfer to ICU is `r n1` in the doxycycline group and `r n2` in the SOC group, a total of `r n1 + n2`.  Allowing for a 5% dropout rate, the corresponding figures are `r n1Rando`, `r n2Rando` and `r n1Rando + n2Rando`.  As we have already exceeded this number of evaluable subjects, no additional calculations to implement a group sequential approach are required.
+
+## Analysis [as randomised]
+
+```{r, echo=FALSE, error=TRUE}
+# Quick and dirty tidy() function for anova objects
+tidy <- function(obj) {
+  h <- attr(obj, "heading")
+  Term <- unlist(h[2] %>% str_split("\n")) %>% 
+    str_remove("Model \\d+\\: ICUAdmissionNeeded ~ ") %>% 
+    str_trim() %>% 
+    str_remove("[:alnum:]+\\s*\\+") %>% 
+    str_remove("[:alnum:]+\\s*\\+") %>% 
+    str_trim()
+  as_tibble(obj) %>% 
+    add_column(Term, .before=1) %>% 
+    mutate(Term=ifelse(Term == "1", "Intercept", Term)) %>% 
+    rename(PValue=5)
+}
+
+performAnalysis <- function(id, data, design, var="ICUAdmissionNeeded", trt="Treatment") {
+  # Score tests
+  fit0 <- glm(as.formula(paste0(var, " ~ 1")), family="binomial", data=data)
+  fit1 <- glm(as.formula(paste0(var, " ~ Stratum")), family="binomial", data=data)
+  fit2 <- glm(as.formula(paste0(var, " ~ Stratum + Sex")), family="binomial", data=data)
+  fit3 <- glm(as.formula(paste0(var, " ~ Stratum + Sex + ", trt)), family="binomial", data=data)
+  x <- summary(fit3)$coefficients
+  
+  waldTests <- as_tibble(x) %>% 
+                 add_column(Term=row.names(x), .before=1) %>% 
+                 add_column(ID=id, .before=1) %>% 
+                 rename(StdErr=`Std. Error`, ZValue=`z value`, PValue=`Pr(>|z|)`) %>% 
+                 mutate(Term=str_replace(Term, paste0("(^(Sex|Stratum|", trt, ")+)"), "\\1: "))
+  scoreTests <- anova(fit0, fit1, fit2, fit3) %>% tidy() %>% add_column(ID=id, .before=1)
+  rv <- list(wald=waldTests, score=scoreTests, fit=fit3)
+  return(rv)
+}
+
+waldTable <- function(id, d) {
+  d %>% 
+    dplyr::select(-ID) %>% 
+    kable(
+      table.attr = "style='width:50%;'",
+      digits=c(NA, 3, 3, 3, 4),
+      col.names=c("Term", "Coefficient", "Std Err", "Statistic", "P value"),
+      caption="Summary of GLM fit: Wald statistics"
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+    add_footnote(notation="none", label="If any cell frequencies are zero, then Wald statistics are potentially invalid.")
+}
+
+scoreTable <- function(id, d) {
+  d %>% 
+    mutate(PValue1=ifelse(row_number() == 1, NA, 1-pchisq(PValue, Df))) %>% 
+    dplyr::select(-ID) %>% 
+    kable(
+      table.attr = "style='width:50%;'",
+      digits=c(NA, 0, 2, 0, 2, 3),
+      col.names=c("Term", "df", "Deviance", "&Delta; df", "&chi;^2^", "P-Value"),
+      caption="Summary of GLM fit: score tests",
+      escape=FALSE
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%      
+    add_footnote(notation="none", label="Score tests are always valid.")
+}
+
+orTable <- function(x, trt="Treatment") {
+  suppressMessages({
+    y <- exp(cbind(coef(x), confint(x)))
+    z <- as_tibble(y, .name_repair="unique") %>% 
+           add_column(Parameter=row.names(y), .before=1) %>% 
+           mutate(Parameter=str_replace(Parameter, paste0("(^Sex|Stratum|", trt, ")"), "\\1: "))
+  })
+  z %>% 
+    filter(stringr::str_detect(Parameter, trt)) %>% 
+    kable(
+      table.attr = "style='width:50%;'",
+      col.names=c("Parameter", "Mean", "Lower", "Upper"),
+      digits=c(NA, 2, 3, 3),
+      caption="Odds ratios"
+    ) %>% 
+    add_header_above(c(" "=2, "Central 95% CI"=2)) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+### Need for ICU admission
+```{r, echo=FALSE, error=TRUE}
+aData <- data %>% filter(!is.na(ICUAdmissionNeeded) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment))
+
+aData %>% 
+  filter(!is.na(Treatment)) %>% 
+  group_by(ICUAdmissionNeeded, Treatment) %>% 
+  arrange(ICUAdmissionNeeded, Treatment) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUAdmissionNeeded,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    Treatment=ifelse(Treatment == "Doxycycline", Treatment, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=Treatment, 
+    names_glue="{Treatment}_{.value}") %>% 
+  select(SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission, by randomised treatment",
+    col.names=c("No", "Yes", "Pct needed", "No", "Yes", "Pct needed"),
+    digits=c(0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c("Standard of care"=3, "Doxycycline"=3)) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+results <- performAnalysis(1, aData)
+scoreTable(1, results$score)
+waldTable(1, results$wald)
+orTable(results$fit)
+```
+
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is statistically significant using both Wald and score tests.  The benefit of doxycycline on ICU admission has been established.
+
+#### Impact of baseline risk factors on primary outcome
+```{r, echo=FALSE}
+covars <- names(data %>% select(starts_with("Stratum"), -Stratum, -StratumCode))
+
+results <- lapply(
+            covars,
+            function(covar) {
+            var <- "ICUAdmissionNeeded"
+            trt <- "Treatment"
+            aData <- data %>% filter(!is.na(ICUAdmissionNeeded) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment))
+            fit0 <- glm(as.formula(paste0(var, " ~ 1")), family="binomial", data=aData)
+            fit1 <- glm(as.formula(paste0(var, " ~ Stratum")), family="binomial", data=aData)
+            fit2 <- glm(as.formula(paste0(var, " ~ Stratum + Sex")), family="binomial", data=aData)
+            fit3 <- glm(as.formula(paste0(var, " ~ Stratum + Sex + ", trt)), family="binomial", data=aData)
+            fit4 <- glm(as.formula(paste0(var, " ~ Stratum + Sex + ", trt, " + ", covar)), family="binomial", data=aData)
+            scoreTests <- anova(fit0, fit1, fit2, fit3, fit4) %>% 
+                            tidy() %>% 
+                            add_column(ID=covar, .before=1) %>% 
+                            tail(1) %>% 
+                            select(-Term)
+            return(scoreTests)
+          }
+        ) %>% bind_rows()
+results %>% 
+  mutate(
+    PValue1=1-pchisq(PValue, Df),
+    ID=str_remove(ID, "Stratum")
+  ) %>% 
+  kable(
+      table.attr = "style='width:50%;'",
+      digits=c(NA, 0, 2, 0, 2, 3),
+      col.names=c("Term", "df", "Deviance", "&Delta; df", "&chi;^2^", "P-Value"),
+      caption="Importance of stratum risk factors [Score tests]",
+      escape=FALSE
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%      
+    add_footnote(notation="none", label="Score tests are always valid.") %>%      
+    add_footnote(notation="none", label="Calculated from a  model including terms for Stratum, Sex, Treatment and the risk factor.")
+```
+
+### Need for ICU admission or death within 14 days of consent
+```{r, echo=FALSE, error=TRUE}
+aData <- data %>% filter(!is.na(ICUDead14) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment))
+results <- performAnalysis(2, aData, var="ICUDead14")
+scoreTable(2, results$score)
+waldTable(2, results$wald)
+orTable(results$fit)
+```
+
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is statistically significant using both Wald and score tests.  Treatment with doxycycline has no effect on the chance of ICU admission or death within 14 days of hospital admission.
+
+### Death at any time after consent
+```{r, echo=FALSE, error=TRUE}
+aData <- data %>% 
+           filter(!is.na(Alive) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment)) %>% 
+           mutate(Dead=!Alive)
+results <- performAnalysis(3, aData, var="Dead")
+scoreTable(2, results$score)
+waldTable(2, results$wald)
+orTable(results$fit)
+```
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is not statistically significant.  Treatment with doxycycline has no effect on the overall likelihood of death.
+
+### Duration of hospital stay
+```{r, echo=FALSE}
+data %>% 
+  select(SiteID, PatNo, Treatment, AdmissionDate, HospitalDischargeDate, DateOfDeath) %>% 
+  mutate(
+    HospitalStay=HospitalDischargeDate - AdmissionDate,
+    HospitalStay=ifelse(is.na(HospitalStay), ifelse(is.na(DateOfDeath), NA, Inf), HospitalStay),
+    LongStay=HospitalStay > 7
+  ) %>% 
+  group_by(Treatment, LongStay) %>% 
+  summarise(N=n(), .groups="drop") %>% 
+  pivot_wider(names_from=Treatment, values_from=N, values_fill=0) %>% 
+  filter(!is.na(LongStay)) %>% 
+  rename(SOC=`Standard of Care`) %>% 
+  select(-`NA`) %>% 
+  kable(caption="Number of patients with hospital admission > 7 days")
+
+data %>% 
+  select(SiteID, PatNo, Treatment, AdmissionDate, HospitalDischargeDate, DateOfDeath) %>% 
+  mutate(
+    HospitalStay=HospitalDischargeDate - AdmissionDate
+  ) %>% 
+  group_by(Treatment) %>% 
+  summarise(
+    N=n(), 
+    Mean=mean(HospitalStay, na.rm=TRUE),
+    SD=sd(HospitalStay, na.rm=TRUE),
+    Min=min(HospitalStay, na.rm=TRUE),
+    Max=max(HospitalStay, na.rm=TRUE),
+    .groups="drop"
+  ) %>% 
+  filter(!is.na(Treatment)) %>% 
+  kable(
+    caption="Summary statistics for length of hospital admission",
+    table.attr = "style='width:70%;'",
+    align="lrrrrr"
+  )
+```
+
+## Other secondary endpoints
+
+We did not record information on the need for mechanical ventilation, recovery from symptoms, resolution of fever and the need for supplemental oxygen.
+
+## Analysis [as treated]
+### Need for ICU admission
+```{r, echo=FALSE, error=TRUE}
+aData <- data%>% 
+           filter(!is.na(ICUAdmissionNeeded) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment)) %>% 
+           mutate(
+             AsTreated=Treatment,
+             AsTreated=ifelse(Treatment == "Doxycycline" & TrtDoxycycline == "0", "Standard of Care", AsTreated),
+             AsTreated=ifelse(Treatment != "Doxycycline" & TrtDoxycycline == "1", "Doxycycline", AsTreated)
+           ) 
+
+aData %>% 
+  filter(!is.na(AsTreated)) %>% 
+  group_by(ICUAdmissionNeeded, AsTreated) %>% 
+  arrange(ICUAdmissionNeeded, AsTreated) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUAdmissionNeeded,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    AsTreated=ifelse(AsTreated == "Doxycycline", AsTreated, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=AsTreated, 
+    names_glue="{AsTreated}_{.value}") %>% 
+  select(SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission, by actual treatment",
+    col.names=c("No", "Yes", "Pct needed", "No", "Yes", "Pct needed"),
+    digits=c(0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c("Standard of care"=3, "Doxycycline"=3)) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+aData %>% 
+  group_by(Treatment, AsTreated) %>% 
+  summarise(N=n(), .groups="drop") %>% 
+  kable(
+    caption="Changes to treatment group assignments",
+    table.attr = "style='width:50%;'"
+  ) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+results <- performAnalysis(1, aData, trt="AsTreated")
+scoreTable(1, results$score)
+waldTable(1, results$wald)
+orTable(results$fit, trt="AsTreated")
+```
+
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is statistically significant using both Wald and score tests.  The benefit of doxycycline on ICU admission has been established.
+
+### Death at any time after consent
+```{r, echo=FALSE, error=TRUE}
+aData <- aData %>% 
+           filter(!is.na(Alive) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment)) %>% 
+           mutate(Dead=!Alive)
+
+aData %>% 
+  filter(!is.na(AsTreated)) %>% 
+  group_by(Dead, AsTreated) %>% 
+  arrange(Dead, AsTreated) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=Dead,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`TRUE`, No=`FALSE`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    AsTreated=ifelse(AsTreated == "Doxycycline", AsTreated, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=AsTreated, 
+    names_glue="{AsTreated}_{.value}") %>% 
+  select(SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Death, by actual treatment",
+    col.names=c("No", "Yes", "Pct needed", "No", "Yes", "Pct needed"),
+    digits=c(0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c("Standard of care"=3, "Doxycycline"=3)) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+results <- performAnalysis(3, aData, var="Dead", trt="AsTreated")
+scoreTable(2, results$score)
+waldTable(2, results$wald)
+orTable(results$fit, trt="AsTreated")
+```
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is not statistically significant.  Treatment with doxycycline has no effect on the overall likelihood of death.
+
+## Analysis [correctly randomised]
+Removing patients for whom randomised treatment is not equal to treatment received.  That is, those patients randomised to doxycycline who did not receive doxycycline and those randomised to SoC who did.
+
+### Need for ICU admission
+```{r, echo=FALSE}
+aData <- data%>% 
+           filter(!is.na(ICUAdmissionNeeded) & !is.na(Sex) & !is.na(Stratum) & !is.na(Treatment)) %>% 
+           mutate(
+             AsTreated=Treatment,
+             AsTreated=ifelse(Treatment == "Doxycycline" & TrtDoxycycline == "0", "Standard of Care", AsTreated),
+             AsTreated=ifelse(Treatment != "Doxycycline" & TrtDoxycycline == "1", "Doxycycline", AsTreated)
+           ) %>% 
+           filter(AsTreated == Treatment)
+
+aData %>% 
+  filter(!is.na(AsTreated)) %>% 
+  group_by(ICUAdmissionNeeded, AsTreated) %>% 
+  arrange(ICUAdmissionNeeded, AsTreated) %>% 
+  summarise(
+    N=n(),
+    .groups="drop"
+  ) %>% 
+  pivot_wider(
+    names_from=ICUAdmissionNeeded,
+    values_from=N,
+    values_fill=0
+  ) %>% 
+  rename(Yes=`1`, No=`0`) %>% 
+  mutate(
+    Pct=100*Yes/(No + Yes),
+    AsTreated=ifelse(AsTreated == "Doxycycline", AsTreated, "SOC")
+    ) %>% 
+  pivot_wider(
+    values_from=c(Yes, No, Pct), 
+    names_from=AsTreated, 
+    names_glue="{AsTreated}_{.value}") %>% 
+  select(SOC_No, SOC_Yes, SOC_Pct, `Doxycycline_No`, `Doxycycline_Yes`, `Doxycycline_Pct`) %>% 
+  kable(
+    table.attr="style='width: 50%;'",
+    caption="Need for ICU admission, by actual treatment",
+    col.names=c("No", "Yes", "Pct needed", "No", "Yes", "Pct needed"),
+    digits=c(0, 0, 1, 0, 0, 1)
+  ) %>% 
+  add_header_above(c("Standard of care"=3, "Doxycycline"=3)) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+aData %>% 
+  group_by(Treatment, AsTreated) %>% 
+  summarise(N=n(), .groups="drop") %>% 
+  kable(
+    caption="Changes to treatment group assignments",
+    table.attr = "style='width:50%;'"
+  ) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+results <- performAnalysis(1, aData, trt="AsTreated")
+scoreTable(1, results$score)
+waldTable(1, results$wald)
+orTable(results$fit, trt="AsTreated")
+```
+
+Wald and score tests are inherently two-sided. Therefore the p-values above should be compared to a critical value of 0.05, rather than the one-sided critical value of 0.025 used in the sample size calculation to determine statistical significance.  The treatment effect is statistically significant using both Wald and score tests.  The benefit of doxycycline on ICU admission has been established.
+
+## Graph summarising results of primary endpoint under different allocations
+```{r, echo=FALSE}
+primaryResults <- tibble(
+                    Variable="ICUAdmission",
+                    Treatment=rep(c("SoC", "SoC + Doxycycline"), times=3),
+                    Approach=rep(c(1, 3, 2), each=2),  # "AsRandomised", "AsTreated", "CorrectlyTreated"
+                    No=c(149, 161, 153, 157, 145, 153),
+                    Yes=c(46,  31,  51,  26,  45,  25),
+                    Total=Yes + No,
+                    Pct=100 * Yes / Total
+                  )
+primaryResults %>%  
+  kable(table.attr = "style='width:35%;'") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+resultsPlot <- primaryResults %>% 
+                 ggplot() +
+                   geom_col(aes(x=as.factor(Approach), y=Pct, fill=Treatment), position="dodge") +
+                   labs(
+                     x="Analytical approach",
+                     y="% of patients needing ICU admission",
+                     title="Summary of primary endpoint"
+                   ) +
+                   scale_x_discrete(labels=c("AR\nP = 0.063", "PP\nP = 0.017", "AT\nP = 0.007")) +
+                   theme_light()
+resultsPlot
+svglite("resultsPlot.svg")
+print(resultsPlot)
+dev.off()
+```
+
+## Raw data
+
+Selected information on patients who died
+```{r, echo=FALSE, error=TRUE}
+tableData <- data %>% 
+  filter(!is.na(DateOfDeath) | Alive == "0") %>% 
+  filter(!is.na(Treatment)) %>% 
+  arrange(SiteID, PatNo) %>% 
+  mutate(
+    SubjID=paste0(SiteID, "-", PatNo),
+    Alive=ifelse(Alive == "0", "No", "Yes"),
+    ICUDead14=ifelse(ICUDead14 == "0", "No", ifelse(ICUDead14 == "1", "Yes", NA)),
+    ICUAdmissionNeeded=ifelse(as.numeric(ICUAdmissionNeeded) == 0, "No", ifelse(as.numeric(ICUAdmissionNeeded) == 1, "Yes", NA)),
+    Treatment=ifelse(Treatment == "Standard of Care", "SOC", "Doxycycline")
+  )
+
+tableData %>% 
+  select(
+    SubjID, Treatment, ICDate, ICUAdmissionNeeded, ICUAdmissionNeededDate, ICUAdmissionSuccess, ICUDischargeDate, 
+    HospitalDischargeDate, DateOfDeath, Alive, ICUDead14) %>% 
+  kable(
+    col.names=c("Pat ID", "Treatment", "Consent", "ICU?", "ICU date", "ICU success?", "ICU discharge", "Hosp discharge",
+                "Date of death", "Alive?", "IorD14?")
+  ) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Several patients apparently could not be admitted to ICU, but the reason for non-admission has been provided for only one.  This makes it difficult to determine which, if any patients, died prior to ICU admission or after.
+
+```{r, echo=FALSE}
+data %>% 
+  filter(!is.na(ICUAdmissionNeeded)) %>% 
+  group_by(ICUAdmissionNeeded, ICUNonAdmissionReason) %>% 
+  summarise(N=n(), .groups="drop") %>% 
+  mutate(
+    ICUAdmissionNeeded=ifelse(ICUAdmissionNeeded, "Yes", "No"),
+    ICUNonAdmissionReason=ifelse(ICUNonAdmissionReason == "1", "Lack of beds", ICUNonAdmissionReason),
+    ICUNonAdmissionReason=ifelse(ICUNonAdmissionReason == "3", "Patient declined", ICUNonAdmissionReason)
+  ) %>% 
+  kable(
+    caption="Summary of reasons for non-admission to ICU",
+    col.names=c("Admission needed?", "Reason for non-admission", "Patients"),
+    table.attr = "style='width:35%;'",
+  ) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+The listing below demonstrates that there are no patients with missing reasons for non-admission to ICU.  The row above with Admission needed? = "Yes" and Reason for admission = NA appears to be incorrect.
+
+```{r}
+data %>% 
+  filter(ICUAdmissionNeeded == 1, ICUAdmissionSuccess == 0) %>% 
+  dplyr::select(SiteID, PatNo, Stratum, ICDate, Treatment, ICUAdmissionNeeded, ICUAdmissionSuccess, ICUNonAdmissionReason) %>% 
+  kable(caption="Patients with missing reasons for non-admission to ICU") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r, echo=FALSE}
+# xlsx::write.xlsx(
+#   tableData %>% 
+#   select(
+#     SubjID, Treatment, ICDate, ICUAdmissionNeeded, ICUAdmissionNeededDate, ICUAdmissionSuccess, ICUDischargeDate,
+#     HospitalDischargeDate, DateOfDeath, Alive, ICUDead14
+#   ),
+#  "datesOfDeath.xlsx"
+# )
+
+xlsx::write.xlsx(
+  data %>% 
+    filter(ICUAdmissionNeeded == "1", ICUAdmissionSuccess == "0") %>% 
+    select(SiteID, PatNo, ICUAdmissionNeeded, ICUAdmissionNeededDate, ICUNonAdmissionReason, Alive, DateOfDeath),
+  "nonAdmissionReasons.xlsx"
+)
+```
+
+```{r, error=TRUE}
+data %>% 
+  mutate(
+    FinalStatusText=case_when(
+                      FinalStatus == 1 ~ "Completed", 
+                      FinalStatus == 2 ~ "Discharged", 
+                      FinalStatus == 3 ~ "DC (AE)",
+                      FinalStatus == 4 ~ "DC (Other)",
+                      FinalStatus == 5 ~ "Lost", 
+                      FinalStatus == 6 ~ "Consent", 
+                      FinalStatus == 7 ~ "Other", 
+                      FinalStatus == 8 ~ "Died",
+                      TRUE ~ "Missing"
+                    )
+  ) %>% 
+  dplyr::select(SiteID, PatNo, Stratum, ICDate, Treatment, ICUAdmissionNeeded, ICUAdmissionNeededDate, DateOfDeath, FinalStatusText) %>% 
+  kable() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
